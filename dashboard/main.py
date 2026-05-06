@@ -36,7 +36,7 @@ logging.basicConfig(
 logger = logging.getLogger("dashboard")
 
 # ── Config ────────────────────────────────────────────────────────────────────
-RABBITMQ_URL = (
+RABBITMQ_URL = os.getenv("RABBITMQ_URL") or (
     f"amqp://{os.getenv('RABBITMQ_USER', 'guest')}:{os.getenv('RABBITMQ_PASS', 'guest')}"
     f"@{os.getenv('RABBITMQ_HOST', 'rabbitmq')}:{os.getenv('RABBITMQ_PORT', '5672')}/"
 )
