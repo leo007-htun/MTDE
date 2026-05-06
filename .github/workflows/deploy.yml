@@ -19,9 +19,11 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
-        run: |
-          pip install pydantic pyomo pytest
+      - name: Install system dependencies
+        run: sudo apt-get install -y glpk-utils
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
 
       - name: Run tests
         run: pytest tests/ -v
