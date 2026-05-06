@@ -148,26 +148,31 @@ def generate_strategy_profile(
 
         client = OpenAI(api_key=OPENAI_API_KEY)
 
-        response = client.chat.completions.create(
+        response = client.responses.create(
             model=OPENAI_MODEL_ID,
-            messages=[
+            input=[
                 {"role": "system", "content": _build_system_prompt()},
                 {"role": "user",   "content": _build_user_prompt(
                     consensus, health_class, telemetry, market, defaults
                 )},
             ],
-            response_format={"type": "json_object"},
-            temperature=0.2,
+            text={"format": {"type": "text"}, "verbosity": "medium"},
+            reasoning={"effort": "medium", "summary": "auto"},
+            tools=[],
+            store=True,
         )
 
-        raw_text = response.choices[0].message.content or ""
+        raw_text = response.output_text or ""
         parsed = _extract_json(raw_text)
 
+        total_tokens = (response.usage.total_tokens
+                        if response.usage and hasattr(response.usage, "total_tokens")
+                        else 0)
         logger.info(
             "OpenAI strategy | model=%s | class=%s | tokens=%d | rationale=%s",
             OPENAI_MODEL_ID,
             health_class,
-            response.usage.total_tokens if response.usage else 0,
+            total_tokens,
             str(parsed.get("rationale", ""))[:100],
         )
 
