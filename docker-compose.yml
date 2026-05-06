@@ -1,0 +1,186 @@
+version: "3.9"
+
+# =============================================================================
+# Multi-Tier Decision Engine  ×  RabbitMQ
+#
+# All configuration is loaded from .env (Docker Compose reads it automatically).
+# Override individual values: RABBITMQ_HOST=myhost docker-compose up
+#
+# Services
+# ─────────
+#  rabbitmq             – message broker  (management UI on :15672)
+#  engine               – all decision tiers + control executor + simulator
+#  ingest-api           – REST endpoints for partner telemetry  (:8000)
+#  ljmu-consensus       – CDAH-MPC 5-hour rolling consensus buffer
+#  ljmu-agent-strategic – CDAH-MPC AI agent (Bytez / Qwen3-0.6B)
+#  dashboard            – live monitoring UI  (:8080)
+# =============================================================================
+
+x-engine-defaults: &engine-defaults
+  build:
+    context: .
+    dockerfile: Dockerfile
+  env_file: .env
+  depends_on:
+    rabbitmq:
+      condition: service_healthy
+  restart: unless-stopped
+  networks:
+    - mtde-net
+
+# Shared RabbitMQ connection block reused across services
+x-rabbitmq-env: &rabbitmq-env
+  RABBITMQ_HOST: ${RABBITMQ_HOST}
+  RABBITMQ_PORT: ${RABBITMQ_PORT}
+  RABBITMQ_USER: ${RABBITMQ_USER}
+  RABBITMQ_PASS: ${RABBITMQ_PASS}
+
+services:
+
+  # ── RabbitMQ ───────────────────────────────────────────────────────────────
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: mtde-rabbitmq
+    hostname: rabbitmq
+    env_file: .env
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
+      RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_DEFAULT_VHOST}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - mtde-net
+
+  # ── Decision Engine (all tiers in one container) ───────────────────────────
+  engine:
+    <<: *engine-defaults
+    container_name: mtde-engine
+    environment:
+      <<: *rabbitmq-env
+      LOG_LEVEL: ${LOG_LEVEL}
+      CONTROL_INTERVAL_SEC: ${CONTROL_INTERVAL_SEC}
+      PREDICTION_HORIZON: ${PREDICTION_HORIZON}
+      STARTUP_DELAY_SEC: ${STARTUP_DELAY_SEC}
+      SOLVER_NAME: ${SOLVER_NAME}
+      SITE_LATITUDE: ${SITE_LATITUDE}
+      SITE_LONGITUDE: ${SITE_LONGITUDE}
+      SITE_ALTITUDE_M: ${SITE_ALTITUDE_M}
+      SITE_TIMEZONE: ${SITE_TIMEZONE}
+      PANEL_AREA_M2: ${PANEL_AREA_M2}
+      EXPECTED_EFFICIENCY: ${EXPECTED_EFFICIENCY}
+      EFFICIENCY_TOLERANCE: ${EFFICIENCY_TOLERANCE}
+      MAX_SAFE_TEMP_C: ${MAX_SAFE_TEMP_C}
+      P_MAX_KW: ${P_MAX_KW}
+      BATT_MAX_KWH: ${BATT_MAX_KWH}
+      LAMBDA_FAILURE: ${LAMBDA_FAILURE}
+      LAMBDA_CURTAILED: ${LAMBDA_CURTAILED}
+      LAMBDA_MAINTENANCE: ${LAMBDA_MAINTENANCE}
+      LAMBDA_CARBON: ${LAMBDA_CARBON}
+      SIM_N_FARMS: ${SIM_N_FARMS}
+      SIM_N_PANELS: ${SIM_N_PANELS}
+      INGEST_API_URL: ${INGEST_API_URL}
+    volumes:
+      - engine-logs:/app/logs
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      ingest-api:
+        condition: service_started
+
+  # ── REST Ingest API (partner telemetry ingestion) ──────────────────────────
+  ingest-api:
+    <<: *engine-defaults
+    container_name: mtde-ingest-api
+    entrypoint: ["uvicorn", "src.api.ingest:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "${INGEST_API_PORT}:8000"
+    environment:
+      <<: *rabbitmq-env
+      EXCHANGE_IDB_FANOUT: ${EXCHANGE_IDB_FANOUT}
+      P_MAX_KW: ${P_MAX_KW}
+
+  # ── CDAH-MPC: Consensus Layer (5-hour TTA rolling buffer) ──────────────────
+  ljmu-consensus:
+    <<: *engine-defaults
+    container_name: ljmu-consensus
+    entrypoint: ["python", "-c",
+      "import asyncio; from src.consensus_layer import ConsensusLayerWorker; asyncio.run(ConsensusLayerWorker().run())"]
+    environment:
+      <<: *rabbitmq-env
+      LOG_LEVEL: ${LOG_LEVEL}
+      CONSENSUS_BUFFER_SIZE: ${CONSENSUS_BUFFER_SIZE}
+      HEALTH_STRESS_HEALTHY: ${HEALTH_STRESS_HEALTHY}
+      HEALTH_STRESS_STABLE: ${HEALTH_STRESS_STABLE}
+      HEALTH_STRESS_DEGRADING: ${HEALTH_STRESS_DEGRADING}
+
+  # ── CDAH-MPC: AI Agent Strategic Layer (Bytez / Qwen3-0.6B) ───────────────
+  ljmu-agent-strategic:
+    <<: *engine-defaults
+    container_name: ljmu-agent-strategic
+    entrypoint: ["python", "-c",
+      "import asyncio; from src.agent_strategic_layer import AgentStrategicLayerWorker; asyncio.run(AgentStrategicLayerWorker().run())"]
+    environment:
+      <<: *rabbitmq-env
+      LOG_LEVEL: ${LOG_LEVEL}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_MODEL_ID: ${OPENAI_MODEL_ID}
+      EXCHANGE_IDB_FANOUT: ${EXCHANGE_IDB_FANOUT}
+      P_MAX_KW: ${P_MAX_KW}
+      HEALTH_STRESS_HEALTHY: ${HEALTH_STRESS_HEALTHY}
+      HEALTH_STRESS_STABLE: ${HEALTH_STRESS_STABLE}
+      HEALTH_STRESS_DEGRADING: ${HEALTH_STRESS_DEGRADING}
+      TREND_THRESHOLD: ${TREND_THRESHOLD}
+
+  # ── Live Dashboard ─────────────────────────────────────────────────────────
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: mtde-dashboard
+    env_file: .env
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - mtde-net
+    ports:
+      - "8080:8080"
+    environment:
+      <<: *rabbitmq-env
+      EXCHANGE_IDB_FANOUT: ${EXCHANGE_IDB_FANOUT}
+
+  # ── Optional: dedicated IoT tier ───────────────────────────────────────────
+  # engine-iot:
+  #   <<: *engine-defaults
+  #   entrypoint: ["python", "-c",
+  #     "import asyncio; from src.iot_layer import IoTAssetLayerWorker; asyncio.run(IoTAssetLayerWorker().run())"]
+
+  # ── Optional: dedicated Regional Edge tier ─────────────────────────────────
+  # engine-regional:
+  #   <<: *engine-defaults
+  #   entrypoint: ["python", "-c",
+  #     "import asyncio; from src.regional_edge_layer import RegionalEdgeLayerWorker; asyncio.run(RegionalEdgeLayerWorker().run())"]
+
+  # ── Optional: dedicated Central tier ──────────────────────────────────────
+  # engine-central:
+  #   <<: *engine-defaults
+  #   entrypoint: ["python", "-c",
+  #     "import asyncio; from src.central_layer import CentralOptimizationLayerWorker; asyncio.run(CentralOptimizationLayerWorker().run())"]
+
+volumes:
+  rabbitmq-data:
+  engine-logs:
+
+networks:
+  mtde-net:
+    driver: bridge

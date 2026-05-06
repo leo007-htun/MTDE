@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AMOS MTDE Dashboard</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:       #0f1117;
+    --surface:  #1a1d27;
+    --border:   #2a2d3a;
+    --text:     #e2e8f0;
+    --muted:    #64748b;
+    --healthy:  #22c55e;
+    --stable:   #eab308;
+    --degrading:#f97316;
+    --critical: #ef4444;
+    --blue:     #3b82f6;
+    --accent:   #6366f1;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-size: 14px;
+    min-height: 100vh;
+  }
+
+  /* ── Header ── */
+  header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 24px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  header h1 { font-size: 18px; font-weight: 700; letter-spacing: 0.5px; }
+  header h1 span { color: var(--accent); }
+  .ws-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--muted); margin-left: 4px;
+    transition: background 0.3s;
+  }
+  .ws-dot.live { background: var(--healthy); box-shadow: 0 0 6px var(--healthy); }
+  .ws-label { font-size: 12px; color: var(--muted); }
+  .last-updated { margin-left: auto; font-size: 12px; color: var(--muted); }
+
+  /* ── Layout ── */
+  main {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-rows: auto auto;
+    gap: 16px;
+    padding: 20px 24px;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+  }
+  .card.wide { grid-column: 1 / -1; }
+  .card h2 {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--muted);
+    margin-bottom: 16px;
+  }
+
+  /* ── Empty state ── */
+  .empty {
+    color: var(--muted);
+    font-size: 13px;
+    text-align: center;
+    padding: 24px 0;
+  }
+
+  /* ── Health badge ── */
+  .badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .badge.healthy   { background: rgba(34,197,94,0.15);  color: var(--healthy); }
+  .badge.stable    { background: rgba(234,179,8,0.15);  color: var(--stable); }
+  .badge.degrading { background: rgba(249,115,22,0.15); color: var(--degrading); }
+  .badge.critical  { background: rgba(239,68,68,0.15);  color: var(--critical); }
+
+  /* ── Metrics grid ── */
+  .metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .metric-row { display: flex; flex-direction: column; gap: 4px; }
+  .metric-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .metric-value { font-size: 22px; font-weight: 700; }
+  .metric-value.sm { font-size: 16px; }
+  .metric-unit { font-size: 12px; color: var(--muted); margin-left: 3px; }
+
+  /* ── Progress bar ── */
+  .bar-wrap { background: var(--border); border-radius: 4px; height: 8px; margin-top: 6px; overflow: hidden; }
+  .bar-fill  { height: 100%; border-radius: 4px; transition: width 0.5s, background 0.5s; }
+
+  /* ── Trend arrow ── */
+  .trend-up   { color: var(--critical); }
+  .trend-down { color: var(--healthy); }
+  .trend-flat { color: var(--muted); }
+
+  /* ── Rationale ── */
+  .rationale {
+    margin-top: 14px;
+    padding: 10px 12px;
+    background: rgba(99,102,241,0.08);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 6px 6px 0;
+    font-size: 13px;
+    color: var(--text);
+    line-height: 1.5;
+  }
+
+  /* ── Divider ── */
+  .divider { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
+
+  /* ── Table ── */
+  table { width: 100%; border-collapse: collapse; }
+  th {
+    text-align: left;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--muted);
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  td { padding: 10px 10px; border-bottom: 1px solid rgba(42,45,58,0.6); font-size: 13px; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+
+  .maint-high { color: var(--critical); font-weight: 600; }
+  .maint-med  { color: var(--stable); }
+  .maint-low  { color: var(--muted); }
+
+  /* ── Fleet totals row ── */
+  .fleet-totals {
+    display: flex;
+    gap: 32px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+
+  /* ── IDB battery vis ── */
+  .soc-bar-wrap {
+    background: var(--border);
+    border-radius: 6px;
+    height: 20px;
+    position: relative;
+    overflow: hidden;
+    margin-top: 8px;
+  }
+  .soc-bar-fill {
+    height: 100%;
+    border-radius: 6px;
+    background: linear-gradient(90deg, var(--blue), var(--accent));
+    transition: width 0.5s;
+  }
+  .soc-bar-label {
+    position: absolute;
+    right: 8px; top: 50%;
+    transform: translateY(-50%);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text);
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>AMOS <span>MTDE</span></h1>
+  <div class="ws-dot" id="ws-dot"></div>
+  <span class="ws-label" id="ws-label">Connecting…</span>
+  <span class="last-updated" id="last-updated">–</span>
+</header>
+
+<main>
+  <!-- Card 1: Consensus / Fleet Health -->
+  <div class="card" id="card-consensus">
+    <h2>Fleet Health (Consensus)</h2>
+    <div class="empty" id="consensus-empty">Waiting for data…</div>
+    <div id="consensus-body" style="display:none">
+      <div class="metrics">
+        <div class="metric-row">
+          <span class="metric-label">Health Stress</span>
+          <div>
+            <span class="metric-value" id="c-stress">–</span>
+            <span class="metric-unit">/ 1.0</span>
+          </div>
+          <div class="bar-wrap"><div class="bar-fill" id="c-stress-bar"></div></div>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">Forecast Confidence</span>
+          <div>
+            <span class="metric-value" id="c-conf">–</span>
+            <span class="metric-unit">/ 1.0</span>
+          </div>
+          <div class="bar-wrap"><div class="bar-fill" id="c-conf-bar" style="background:var(--blue)"></div></div>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">Degradation Trend</span>
+          <span class="metric-value sm" id="c-trend">–</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">Samples in Window</span>
+          <span class="metric-value sm" id="c-samples">–</span>
+        </div>
+      </div>
+      <hr class="divider">
+      <div style="font-size:12px;color:var(--muted)">
+        Window: <span id="c-window">–</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Card 2: Strategy Profile -->
+  <div class="card" id="card-strategy">
+    <h2>AI Strategy Profile</h2>
+    <div class="empty" id="strategy-empty">Waiting for data…</div>
+    <div id="strategy-body" style="display:none">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+        <span class="badge" id="s-badge">–</span>
+        <span style="font-size:12px;color:var(--muted)" id="s-timestamp">–</span>
+      </div>
+      <div class="metrics">
+        <div class="metric-row">
+          <span class="metric-label">Max Charge Rate</span>
+          <div><span class="metric-value" id="s-charge">–</span><span class="metric-unit">kW</span></div>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">Thermal Limit</span>
+          <div><span class="metric-value" id="s-thermal">–</span><span class="metric-unit">°C</span></div>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">Maint. Window</span>
+          <div><span class="metric-value" id="s-maint">–</span><span class="metric-unit">h</span></div>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">Economic Weight</span>
+          <span class="metric-value" id="s-lambda">–</span>
+        </div>
+      </div>
+      <div class="rationale" id="s-rationale">–</div>
+    </div>
+  </div>
+
+  <!-- Card 3: IDB Hardware Telemetry -->
+  <div class="card" id="card-idb">
+    <h2>IDB Hardware Telemetry</h2>
+    <div class="empty" id="idb-empty">Waiting for data…</div>
+    <div id="idb-body" style="display:none">
+      <div class="metric-row" style="margin-bottom:12px">
+        <span class="metric-label">Battery SoC</span>
+        <div class="soc-bar-wrap">
+          <div class="soc-bar-fill" id="idb-soc-bar"></div>
+          <span class="soc-bar-label" id="idb-soc-label">–</span>
+        </div>
+      </div>
+      <div class="metrics">
+        <div class="metric-row">
+          <span class="metric-label">Battery Temp</span>
+          <div><span class="metric-value sm" id="idb-batt-temp">–</span><span class="metric-unit">°C</span></div>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">Battery Power</span>
+          <div><span class="metric-value sm" id="idb-batt-kw">–</span><span class="metric-unit">kW</span></div>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">Solar Output</span>
+          <div><span class="metric-value sm" id="idb-solar">–</span><span class="metric-unit">kW</span></div>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">Grid Exchange</span>
+          <div><span class="metric-value sm" id="idb-grid">–</span><span class="metric-unit">kW</span></div>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">Compressor Load</span>
+          <div><span class="metric-value sm" id="idb-comp-load">–</span><span class="metric-unit">%</span></div>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">Vibration</span>
+          <div><span class="metric-value sm" id="idb-vib">–</span><span class="metric-unit">g</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Card 4: Fleet Schedule (full width) -->
+  <div class="card wide" id="card-fleet">
+    <h2>Fleet Schedule (Control Executor Output)</h2>
+    <div class="empty" id="fleet-empty">Waiting for sensor data → IoT → Regional → Central pipeline to fire…</div>
+    <div id="fleet-body" style="display:none">
+      <div class="fleet-totals">
+        <div class="metric-row">
+          <span class="metric-label">Total Generation</span>
+          <div><span class="metric-value" id="f-gen">–</span><span class="metric-unit">kW</span></div>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">Total Carbon</span>
+          <div><span class="metric-value" id="f-co2">–</span><span class="metric-unit">kg CO₂</span></div>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">Farms</span>
+          <span class="metric-value" id="f-farms">–</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">Solver</span>
+          <span class="metric-value sm" id="f-solver">–</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">Timestamp</span>
+          <span class="metric-value sm" id="f-timestamp">–</span>
+        </div>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Farm</th>
+            <th>Generation Target</th>
+            <th>Storage Allocation</th>
+            <th>Maintenance Priority</th>
+          </tr>
+        </thead>
+        <tbody id="f-table-body"></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<script>
+  // ── Utilities ────────────────────────────────────────────────────────────────
+  const $ = id => document.getElementById(id);
+
+  function fmt(v, decimals=1) {
+    if (v == null) return '–';
+    return Number(v).toFixed(decimals);
+  }
+
+  function fmtTs(iso) {
+    if (!iso) return '–';
+    const d = new Date(iso);
+    return d.toLocaleTimeString();
+  }
+
+  function stressColor(s) {
+    if (s < 0.30) return 'var(--healthy)';
+    if (s < 0.50) return 'var(--stable)';
+    if (s < 0.70) return 'var(--degrading)';
+    return 'var(--critical)';
+  }
+
+  function trendHtml(t) {
+    if (t == null) return '–';
+    const v = Number(t);
+    const sign = v > 0.0001 ? '▲' : v < -0.0001 ? '▼' : '●';
+    const cls  = v > 0.0001 ? 'trend-up' : v < -0.0001 ? 'trend-down' : 'trend-flat';
+    return `<span class="${cls}">${sign} ${fmt(v, 4)}/hr</span>`;
+  }
+
+  function maintClass(v) {
+    if (v > 0.5) return 'maint-high';
+    if (v > 0.2) return 'maint-med';
+    return 'maint-low';
+  }
+
+  function show(bodyId, emptyId) {
+    $(bodyId).style.display = '';
+    $(emptyId).style.display = 'none';
+  }
+
+  // ── Renderers ────────────────────────────────────────────────────────────────
+  function renderConsensus(d) {
+    show('consensus-body', 'consensus-empty');
+    const s = Number(d.health_stress);
+    const c = Number(d.forecast_confidence);
+    $('c-stress').textContent = fmt(s, 3);
+    $('c-stress-bar').style.width = (s * 100) + '%';
+    $('c-stress-bar').style.background = stressColor(s);
+    $('c-conf').textContent = fmt(c, 3);
+    $('c-conf-bar').style.width = (c * 100) + '%';
+    $('c-trend').innerHTML = trendHtml(d.degradation_trend);
+    $('c-samples').textContent = d.n_samples ?? '–';
+    const ws = fmtTs(d.window_start);
+    const we = fmtTs(d.window_end);
+    $('c-window').textContent = `${ws} – ${we}`;
+  }
+
+  function renderStrategy(d) {
+    show('strategy-body', 'strategy-empty');
+    const cls = d.health_class || 'healthy';
+    const badge = $('s-badge');
+    badge.textContent = cls;
+    badge.className = `badge ${cls}`;
+    $('s-timestamp').textContent = fmtTs(d.timestamp);
+    $('s-charge').textContent = fmt(d.max_charge_rate_kw, 0);
+    $('s-thermal').textContent = fmt(d.thermal_limit_c, 0);
+    $('s-maint').textContent = d.maintenance_window_hours ?? '–';
+    $('s-lambda').textContent = fmt(d.lambda_economic, 2);
+    $('s-rationale').textContent = d.rationale || '–';
+  }
+
+  function renderIdb(d) {
+    show('idb-body', 'idb-empty');
+    const soc    = Number(d.battery_soc_kwh);
+    const socMax = Number(d.battery_soc_max_kwh) || 1000;
+    const pct    = Math.round(soc / socMax * 100);
+    $('idb-soc-bar').style.width = pct + '%';
+    $('idb-soc-label').textContent = `${pct}%  (${fmt(soc, 0)} / ${socMax} kWh)`;
+    $('idb-batt-temp').textContent = fmt(d.battery_temp_c, 1);
+    const bkw = Number(d.battery_power_kw);
+    $('idb-batt-kw').textContent = (bkw >= 0 ? '+' : '') + fmt(bkw, 1);
+    $('idb-solar').textContent = fmt(d.solar_power_kw, 1);
+    const gkw = Number(d.grid_exchange_kw);
+    $('idb-grid').textContent = (gkw >= 0 ? '+' : '') + fmt(gkw, 1);
+    $('idb-comp-load').textContent = fmt(d.compressor_load_pct, 1);
+    $('idb-vib').textContent = fmt(d.compressor_vibration_g, 3);
+  }
+
+  function renderFleet(d) {
+    show('fleet-body', 'fleet-empty');
+    $('f-gen').textContent = fmt(d.total_generation_kw, 1);
+    $('f-co2').textContent = fmt(d.total_carbon_kg, 2);
+    $('f-farms').textContent = (d.farm_targets || []).length;
+    $('f-solver').textContent = d.solver_status || '–';
+    $('f-timestamp').textContent = fmtTs(d.timestamp);
+
+    const tbody = $('f-table-body');
+    tbody.innerHTML = '';
+    (d.farm_targets || []).forEach(t => {
+      const mc = maintClass(t.maintenance_priority);
+      tbody.innerHTML += `
+        <tr>
+          <td>${t.farm_id}</td>
+          <td>${fmt(t.generation_target_kw, 1)} kW</td>
+          <td>${fmt(t.storage_allocation_kwh, 1)} kWh</td>
+          <td class="${mc}">${fmt(t.maintenance_priority, 3)}</td>
+        </tr>`;
+    });
+  }
+
+  function renderState(state) {
+    if (state.consensus) renderConsensus(state.consensus);
+    if (state.strategy)  renderStrategy(state.strategy);
+    if (state.idb)       renderIdb(state.idb);
+    if (state.fleet)     renderFleet(state.fleet);
+    if (state.last_updated) {
+      $('last-updated').textContent = 'Updated ' + fmtTs(state.last_updated);
+    }
+  }
+
+  // ── WebSocket ────────────────────────────────────────────────────────────────
+  const dot   = $('ws-dot');
+  const label = $('ws-label');
+
+  function connect() {
+    const ws = new WebSocket(`ws://${location.host}/ws`);
+
+    ws.onopen = () => {
+      dot.classList.add('live');
+      label.textContent = 'Live';
+    };
+
+    ws.onmessage = e => {
+      const msg = JSON.parse(e.data);
+      if (msg.type === 'state') {
+        renderState(msg.data);
+      } else {
+        // Partial update
+        const handlers = {
+          fleet:     renderFleet,
+          strategy:  renderStrategy,
+          consensus: renderConsensus,
+          idb:       renderIdb,
+        };
+        if (handlers[msg.type]) handlers[msg.type](msg.data);
+        $('last-updated').textContent = 'Updated ' + new Date().toLocaleTimeString();
+      }
+    };
+
+    ws.onclose = () => {
+      dot.classList.remove('live');
+      label.textContent = 'Reconnecting…';
+      setTimeout(connect, 3000);
+    };
+
+    ws.onerror = () => ws.close();
+  }
+
+  connect();
+</script>
+</body>
+</html>

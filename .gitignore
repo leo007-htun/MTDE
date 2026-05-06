@@ -1,0 +1,25 @@
+# Environment — never commit real secrets
+.env
+.env.local
+.env.production
+
+# Claude Code local settings
+.claude/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# Logs
+logs/
+*.log
+
+# Solver temp files
+*.lp
+*.mps
+*.glpk
