@@ -53,6 +53,8 @@ from config.settings import CONTROL_INTERVAL_SEC, INGEST_API_URL
 from src.iot_layer                import IoTAssetLayerWorker
 from src.regional_edge_layer      import RegionalEdgeLayerWorker
 from src.central_layer            import CentralOptimizationLayerWorker
+from src.consensus_layer          import ConsensusLayerWorker
+from src.agent_strategic_layer    import AgentStrategicLayerWorker
 from src.models.data_models       import PanelSensorReading, SensorDataMessage
 
 # ── Logging setup ─────────────────────────────────────────────────────────────
@@ -239,6 +241,8 @@ async def main() -> None:
         CentralOptimizationLayerWorker(),
         ControlExecutorWorker(),
         SensorSimulator(),
+        ConsensusLayerWorker(),
+        AgentStrategicLayerWorker(),
     ]
 
     loop = asyncio.get_running_loop()
