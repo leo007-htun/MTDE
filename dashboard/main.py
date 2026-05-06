@@ -23,9 +23,12 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional
 
+import secrets
+
 import aio_pika
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Form, WebSocket, WebSocketDisconnect
+from fastapi.requests import Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 logging.basicConfig(
@@ -40,6 +43,10 @@ RABBITMQ_URL = os.getenv("RABBITMQ_URL") or (
     f"amqp://{os.getenv('RABBITMQ_USER', 'guest')}:{os.getenv('RABBITMQ_PASS', 'guest')}"
     f"@{os.getenv('RABBITMQ_HOST', 'rabbitmq')}:{os.getenv('RABBITMQ_PORT', '5672')}/"
 )
+_USERNAME = "admin"
+_PASSWORD = "admin"
+_sessions: set[str] = set()
+
 EXCHANGE_MAIN      = "mtde.topic"
 EXCHANGE_IDB_FANOUT = os.getenv("EXCHANGE_IDB_FANOUT", "idb.fanout")
 
@@ -200,14 +207,49 @@ app = FastAPI(title="AMOS MTDE Dashboard", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
+def _authenticated(request: Request) -> bool:
+    token = request.cookies.get("session")
+    return token is not None and token in _sessions
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page():
+    with open("static/login.html") as f:
+        return f.read()
+
+
+@app.post("/login")
+async def login(username: str = Form(...), password: str = Form(...)):
+    if username == _USERNAME and password == _PASSWORD:
+        token = secrets.token_hex(32)
+        _sessions.add(token)
+        resp = RedirectResponse(url="/", status_code=303)
+        resp.set_cookie("session", token)
+        return resp
+    return RedirectResponse(url="/login?error=1", status_code=303)
+
+
+@app.get("/logout")
+async def logout(request: Request):
+    token = request.cookies.get("session")
+    _sessions.discard(token)
+    resp = RedirectResponse(url="/login", status_code=303)
+    resp.delete_cookie("session")
+    return resp
+
+
 @app.get("/", response_class=HTMLResponse)
-async def root():
+async def root(request: Request):
+    if not _authenticated(request):
+        return RedirectResponse(url="/login", status_code=303)
     with open("static/index.html") as f:
         return f.read()
 
 
 @app.get("/api/state")
-async def get_state():
+async def get_state(request: Request):
+    if not _authenticated(request):
+        return RedirectResponse(url="/login", status_code=303)
     return _state
 
 
