@@ -190,7 +190,7 @@ def fleet_optimize(
     model.F = pyo.Set(initialize=F)
 
     model.Gen   = pyo.Var(model.F, within=pyo.NonNegativeReals)
-    model.Maint = pyo.Var(model.F, within=pyo.NonNegativeReals, bounds=(0.0, 1.0))
+    model.Maint = pyo.Var(model.F, within=pyo.NonNegativeReals, bounds=(0.0, 1.0), initialize=0.0)
     model.Store = pyo.Var(model.F, within=pyo.NonNegativeReals)
 
     def obj_rule(m):
@@ -227,7 +227,7 @@ def fleet_optimize(
 
     if status in ("optimal", "feasible"):
         gen_targets   = {farm_map[i]: pyo.value(model.Gen[i])   or 0.0 for i in F}
-        maint_prio    = {farm_map[i]: pyo.value(model.Maint[i]) or 0.0 for i in F}
+        maint_prio    = {farm_map[i]: (pyo.value(model.Maint[i], exception=False) or 0.0) for i in F}
         storage_alloc = {farm_map[i]: pyo.value(model.Store[i]) or 0.0 for i in F}
     else:
         logger.warning("Fleet optimiser infeasible – equal split fallback")
