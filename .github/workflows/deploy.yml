@@ -1,4 +1,4 @@
-name: Deploy AMOS Engine
+name: Deploy AMOS Engine to Railway
 
 on:
   push:
@@ -12,101 +12,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Write .env from secrets
-        run: |
-          cat <<EOF > .env
-          # RabbitMQ
-          RABBITMQ_HOST=${{ secrets.RABBITMQ_HOST }}
-          RABBITMQ_PORT=${{ secrets.RABBITMQ_PORT }}
-          RABBITMQ_USER=${{ secrets.RABBITMQ_USER }}
-          RABBITMQ_PASS=${{ secrets.RABBITMQ_PASS }}
-          RABBITMQ_VHOST=${{ secrets.RABBITMQ_VHOST }}
-          RABBITMQ_DEFAULT_USER=${{ secrets.RABBITMQ_USER }}
-          RABBITMQ_DEFAULT_PASS=${{ secrets.RABBITMQ_PASS }}
-          RABBITMQ_DEFAULT_VHOST=${{ secrets.RABBITMQ_VHOST }}
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
 
-          # Ingest API
-          INGEST_API_URL=${{ secrets.INGEST_API_URL }}
-          INGEST_API_PORT=${{ secrets.INGEST_API_PORT }}
-
-          # Engine
-          LOG_LEVEL=${{ secrets.LOG_LEVEL }}
-          CONTROL_INTERVAL_SEC=${{ secrets.CONTROL_INTERVAL_SEC }}
-          PREDICTION_HORIZON=${{ secrets.PREDICTION_HORIZON }}
-          STARTUP_DELAY_SEC=${{ secrets.STARTUP_DELAY_SEC }}
-          SOLVER_NAME=${{ secrets.SOLVER_NAME }}
-
-          # Simulator
-          SIM_N_FARMS=${{ secrets.SIM_N_FARMS }}
-          SIM_N_PANELS=${{ secrets.SIM_N_PANELS }}
-
-          # Asset physics
-          PANEL_AREA_M2=${{ secrets.PANEL_AREA_M2 }}
-          EXPECTED_EFFICIENCY=${{ secrets.EXPECTED_EFFICIENCY }}
-          EFFICIENCY_TOLERANCE=${{ secrets.EFFICIENCY_TOLERANCE }}
-          MAX_SAFE_TEMP_C=${{ secrets.MAX_SAFE_TEMP_C }}
-          P_MAX_KW=${{ secrets.P_MAX_KW }}
-          BATT_MAX_KWH=${{ secrets.BATT_MAX_KWH }}
-
-          # Site location
-          SITE_LATITUDE=${{ secrets.SITE_LATITUDE }}
-          SITE_LONGITUDE=${{ secrets.SITE_LONGITUDE }}
-          SITE_ALTITUDE_M=${{ secrets.SITE_ALTITUDE_M }}
-          SITE_TIMEZONE=${{ secrets.SITE_TIMEZONE }}
-
-          # Optimisation weights
-          LAMBDA_FAILURE=${{ secrets.LAMBDA_FAILURE }}
-          LAMBDA_CURTAILED=${{ secrets.LAMBDA_CURTAILED }}
-          LAMBDA_MAINTENANCE=${{ secrets.LAMBDA_MAINTENANCE }}
-          LAMBDA_CARBON=${{ secrets.LAMBDA_CARBON }}
-
-          # CDAH-MPC consensus
-          CONSENSUS_BUFFER_SIZE=${{ secrets.CONSENSUS_BUFFER_SIZE }}
-          HEALTH_STRESS_HEALTHY=${{ secrets.HEALTH_STRESS_HEALTHY }}
-          HEALTH_STRESS_STABLE=${{ secrets.HEALTH_STRESS_STABLE }}
-          HEALTH_STRESS_DEGRADING=${{ secrets.HEALTH_STRESS_DEGRADING }}
-          TREND_THRESHOLD=${{ secrets.TREND_THRESHOLD }}
-
-          # OpenAI
-          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
-          OPENAI_MODEL_ID=${{ secrets.OPENAI_MODEL_ID }}
-
-          # IDB
-          EXCHANGE_IDB_FANOUT=${{ secrets.EXCHANGE_IDB_FANOUT }}
-
-          # SeoulTech TTA
-          SEOULTECH_DATA_ID=${{ secrets.SEOULTECH_DATA_ID }}
-          FORECAST_HOURS=${{ secrets.FORECAST_HOURS }}
-          LOOKBACK_HOURS=${{ secrets.LOOKBACK_HOURS }}
-
-          # IDB simulator
-          P_SOLAR_MAX_KW=${{ secrets.P_SOLAR_MAX_KW }}
-          P_DEMAND_KW=${{ secrets.P_DEMAND_KW }}
-          DEGRADE_MODE=${{ secrets.DEGRADE_MODE }}
-
-          # Publish interval
-          PUBLISH_INTERVAL_SEC=${{ secrets.PUBLISH_INTERVAL_SEC }}
-          EOF
-
-      - name: Copy files to server
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          password: ${{ secrets.SSH_PASSWORD }}
-          source: "."
-          target: "/opt/amos"
-
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          password: ${{ secrets.SSH_PASSWORD }}
-          script: |
-            cd /opt/amos
-            docker compose pull
-            docker compose up -d --build
-            docker compose ps
+      - name: Deploy to Railway
+        run: railway up --detach
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
