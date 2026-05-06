@@ -475,7 +475,8 @@
   const label = $('ws-label');
 
   function connect() {
-    const ws = new WebSocket(`ws://${location.host}/ws`);
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const ws = new WebSocket(`${proto}//${location.host}/ws`);
 
     ws.onopen = () => {
       dot.classList.add('live');
