@@ -2,7 +2,8 @@
 AMOS – Enverse CSV Replay
 =========================
 Reads a 6707ba_*.csv file from Enverse and feeds real inverter data
-into the AMOS ingest-api as SensorDataMessage payloads.
+into the AMOS ingest-api. Also sends synthetic IDB telemetry and market
+signals so all four dashboard cards populate from a single script.
 
 Usage:
     python scripts/enverse_replay.py
@@ -17,6 +18,11 @@ Columns used:
     {inv}-Active Power  → power_kw  (per inverter)
     bLTGSH-Irradiance   → irradiance_wm2 (shared across all inverters)
     inverter_temp_c     → 45.0 constant (not in CSV)
+
+Side-car data (synthetic, sent periodically):
+    /ingest/tta          every 60 rows
+    /ingest/telemetries  every 10 rows  (IDB battery hardware telemetry)
+    /ingest/market       every 20 rows  (electricity market price signal)
 """
 from __future__ import annotations
 
@@ -27,7 +33,6 @@ import logging
 import math
 import os
 import random
-import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -46,7 +51,10 @@ FARM_ID   = "6707ba"
 INVERTERS = ["ELDCwM", "PQMwDB", "QUwKPC", "ethTug", "mnsfgX", "qfpgEw"]
 INVERTER_TEMP_C  = 45.0
 AMBIENT_TEMP_C   = 25.0
-TTA_EVERY_N_ROWS = 60   # synthetic TTA sent once per ~hour of CSV data
+
+TTA_EVERY_N_ROWS    = 60   # ~1 per hour of data
+IDB_EVERY_N_ROWS    = 10   # battery telemetry
+MARKET_EVERY_N_ROWS = 20   # market price signal
 
 DEFAULT_URL = os.getenv("INGEST_API_URL", "https://mtde-production.up.railway.app")
 
@@ -70,32 +78,27 @@ def _f(row: dict, col: str) -> float:
         return 0.0
 
 
+# ── Payload builders ───────────────────────────────────────────────────────────
+
 def build_sensor_payload(row: dict) -> dict:
-    ts_raw = row["timestamp"]
-    # Parse the timestamp and convert to UTC ISO string
-    ts = datetime.fromisoformat(ts_raw).astimezone(timezone.utc).isoformat()
+    ts = datetime.fromisoformat(row["timestamp"]).astimezone(timezone.utc).isoformat()
     irr = max(0.0, _f(row, "bLTGSH-Irradiance"))
-
-    panels = [
-        {
-            "panel_id":        f"{FARM_ID}_{inv}",
-            "timestamp":       ts,
-            "power_kw":        max(0.0, _f(row, f"{inv}-Active Power")),
-            "irradiance_wm2":  irr,
-            "inverter_temp_c": INVERTER_TEMP_C,
-            "ambient_temp_c":  AMBIENT_TEMP_C,
-        }
-        for inv in INVERTERS
-    ]
-
     return {
         "farm_id":   FARM_ID,
         "timestamp": ts,
-        "panels":    panels,
+        "panels": [
+            {
+                "panel_id":        f"{FARM_ID}_{inv}",
+                "timestamp":       ts,
+                "power_kw":        max(0.0, _f(row, f"{inv}-Active Power")),
+                "irradiance_wm2":  irr,
+                "inverter_temp_c": INVERTER_TEMP_C,
+                "ambient_temp_c":  AMBIENT_TEMP_C,
+            }
+            for inv in INVERTERS
+        ],
     }
 
-
-# ── Synthetic TTA (no real forecast in CSV) ────────────────────────────────────
 
 def build_tta_payload(reference_ts: datetime) -> dict:
     base = reference_ts.replace(minute=0, second=0, microsecond=0)
@@ -107,22 +110,46 @@ def build_tta_payload(reference_ts: datetime) -> dict:
         forecasts.append(round(sf * 200.0 * (1 + random.uniform(-0.08, 0.08)), 2))
         timestamps.append(t.isoformat())
     return {
-        "data_id":                    f"{FARM_ID}_meter_1",
-        "timestamp":                  reference_ts.isoformat(),
-        "adapted_predictions_denorm": forecasts,
-        "prediction_timestamps":      timestamps,
-        "adaptation_gap":             round(random.uniform(0.05, 0.25), 4),
+        "data_id":                     f"{FARM_ID}_meter_1",
+        "timestamp":                   reference_ts.isoformat(),
+        "adapted_predictions_denorm":  forecasts,
+        "prediction_timestamps":       timestamps,
+        "adaptation_gap":              round(random.uniform(0.05, 0.25), 4),
         "original_predictions_denorm": [round(v * (1 + random.uniform(-0.06, 0.06)), 2)
                                         for v in forecasts],
     }
 
 
-# ── HTTP helpers ───────────────────────────────────────────────────────────────
+def build_idb_payload(solar_kw: float) -> dict:
+    soc = round(random.uniform(400.0, 800.0), 1)
+    return {
+        "timestamp":              datetime.now(tz=timezone.utc).isoformat(),
+        "battery_soc_kwh":        soc,
+        "battery_soc_max_kwh":    1000.0,
+        "battery_temp_c":         round(random.uniform(26.0, 34.0), 1),
+        "battery_power_kw":       round(solar_kw * 0.15 - 10.0, 1),  # charge when sunny
+        "solar_power_kw":         round(solar_kw, 1),
+        "grid_exchange_kw":       round(random.uniform(-40.0, 10.0), 1),
+        "compressor_vibration_g": round(random.uniform(0.05, 0.22), 3),
+        "compressor_load_pct":    round(random.uniform(30.0, 60.0), 1),
+    }
+
+
+def build_market_payload() -> dict:
+    hour = datetime.now(tz=timezone.utc).hour
+    base = 0.28 if 7 <= hour <= 21 else 0.12
+    return {
+        "timestamp":                 datetime.now(tz=timezone.utc).isoformat(),
+        "price_per_kwh":             round(base * (1 + random.uniform(-0.15, 0.15)), 4),
+        "carbon_intensity_gco2_kwh": round(random.uniform(180.0, 260.0), 1),
+    }
+
+
+# ── HTTP helper ────────────────────────────────────────────────────────────────
 
 async def post(client: httpx.AsyncClient, base_url: str, path: str, payload: dict) -> bool:
-    url = f"{base_url}{path}"
     try:
-        r = await client.post(url, json=payload, timeout=15.0)
+        r = await client.post(f"{base_url}{path}", json=payload, timeout=15.0)
         r.raise_for_status()
         return True
     except httpx.HTTPStatusError as e:
@@ -141,7 +168,6 @@ async def replay(csv_path: Path, base_url: str, delay: float, realtime: bool, sk
              "realtime" if realtime else "fast", delay, skip_night)
 
     async with httpx.AsyncClient() as client:
-        # Health check
         try:
             r = await client.get(f"{base_url}/health", timeout=10.0)
             log.info("Health: %s", r.json())
@@ -149,43 +175,47 @@ async def replay(csv_path: Path, base_url: str, delay: float, realtime: bool, sk
             log.warning("Health check failed (%s) — continuing anyway", e)
 
         with open(csv_path, newline="", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            rows = list(reader)
+            rows = list(csv.DictReader(f))
 
-        total = len(rows)
-        log.info("Rows to replay: %d", total)
+        log.info("Rows to replay: %d", len(rows))
 
         prev_ts: datetime | None = None
-        tta_counter = 0
+        tta_counter = idb_counter = market_counter = 0
 
         for i, row in enumerate(rows):
             irr = _f(row, "bLTGSH-Irradiance")
             if skip_night and irr == 0.0:
                 continue
 
-            payload = build_sensor_payload(row)
-            ok = await post(client, base_url, "/ingest/sensor", payload)
-
-            cur_ts = datetime.fromisoformat(row["timestamp"]).astimezone(timezone.utc)
+            # ── Real sensor data ──────────────────────────────────────────────
+            ok = await post(client, base_url, "/ingest/sensor", build_sensor_payload(row))
+            cur_ts   = datetime.fromisoformat(row["timestamp"]).astimezone(timezone.utc)
             total_kw = sum(max(0.0, _f(row, f"{inv}-Active Power")) for inv in INVERTERS)
 
             if ok:
-                log.info(
-                    "Row %4d/%d | %s | irr=%.0f W/m² | total=%.1f kW",
-                    i + 1, total,
-                    cur_ts.strftime("%H:%M UTC"),
-                    irr,
-                    total_kw,
-                )
+                log.info("Row %4d/%d | %s | irr=%.0f W/m² | total=%.1f kW",
+                         i + 1, len(rows), cur_ts.strftime("%H:%M UTC"), irr, total_kw)
 
-            # Send synthetic TTA every TTA_EVERY_N_ROWS rows
+            # ── IDB hardware telemetry ────────────────────────────────────────
+            idb_counter += 1
+            if idb_counter >= IDB_EVERY_N_ROWS:
+                idb_counter = 0
+                await post(client, base_url, "/ingest/telemetries", build_idb_payload(total_kw))
+
+            # ── Market signal ─────────────────────────────────────────────────
+            market_counter += 1
+            if market_counter >= MARKET_EVERY_N_ROWS:
+                market_counter = 0
+                await post(client, base_url, "/ingest/market", build_market_payload())
+
+            # ── TTA forecast ──────────────────────────────────────────────────
             tta_counter += 1
             if tta_counter >= TTA_EVERY_N_ROWS:
                 tta_counter = 0
                 await post(client, base_url, "/ingest/tta", build_tta_payload(cur_ts))
                 log.info("TTA sent for %s", cur_ts.strftime("%Y-%m-%d %H:%M UTC"))
 
-            # Pacing
+            # ── Pacing ────────────────────────────────────────────────────────
             if realtime and prev_ts is not None:
                 gap = (cur_ts - prev_ts).total_seconds()
                 if gap > 0:
@@ -195,7 +225,7 @@ async def replay(csv_path: Path, base_url: str, delay: float, realtime: bool, sk
 
             prev_ts = cur_ts
 
-        log.info("Replay complete — %d rows sent", total)
+        log.info("Replay complete — %d rows sent", len(rows))
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────
@@ -215,11 +245,11 @@ if __name__ == "__main__":
 
     try:
         asyncio.run(replay(
-            csv_path  = csv_path,
-            base_url  = args.url.rstrip("/"),
-            delay     = args.delay,
-            realtime  = args.realtime,
-            skip_night= args.skip_night,
+            csv_path   = csv_path,
+            base_url   = args.url.rstrip("/"),
+            delay      = args.delay,
+            realtime   = args.realtime,
+            skip_night = args.skip_night,
         ))
     except KeyboardInterrupt:
         log.info("Stopped.")
