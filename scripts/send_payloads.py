@@ -36,7 +36,7 @@ log = logging.getLogger("sender")
 BASE_URL            = os.getenv("INGEST_API_URL", "https://mtde-production.up.railway.app")
 SENSOR_INTERVAL     = int(os.getenv("SENSOR_INTERVAL_SEC",  "30"))
 MARKET_INTERVAL     = int(os.getenv("MARKET_INTERVAL_SEC",  "300"))
-TTA_INTERVAL        = int(os.getenv("TTA_INTERVAL_SEC",     "3600"))
+TTA_INTERVAL        = int(os.getenv("TTA_INTERVAL_SEC",     "30"))
 
 N_FARMS  = 3
 N_PANELS = 10

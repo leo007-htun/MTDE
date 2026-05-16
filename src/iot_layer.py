@@ -81,6 +81,8 @@ def compute_panel_health(
             efficiency=0.0,
             degradation_flag=False,
             inverter_temp_c=inverter_temp_c,
+            power_kw=power_kw,
+            irradiance_wm2=irradiance_wm2,
         )
 
     # η  = P_out / (G × A)
@@ -112,6 +114,8 @@ def compute_panel_health(
         efficiency=efficiency,
         degradation_flag=degradation_flag,
         inverter_temp_c=inverter_temp_c,
+        power_kw=power_kw,
+        irradiance_wm2=irradiance_wm2,
     )
 
 

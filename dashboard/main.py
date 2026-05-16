@@ -52,10 +52,11 @@ EXCHANGE_IDB_FANOUT = os.getenv("EXCHANGE_IDB_FANOUT", "idb.fanout")
 
 # ── In-memory state cache ─────────────────────────────────────────────────────
 _state: dict = {
-    "fleet":      None,
-    "strategy":   None,
-    "consensus":  None,
-    "idb":        None,
+    "fleet":        None,
+    "strategy":     None,
+    "consensus":    None,
+    "idb":          None,
+    "panel_health": None,
     "last_updated": None,
 }
 
@@ -142,6 +143,20 @@ async def _on_consensus(msg: aio_pika.IncomingMessage) -> None:
             logger.exception("Failed to process consensus message")
 
 
+async def _on_panel_health(msg: aio_pika.IncomingMessage) -> None:
+    async with msg.process():
+        try:
+            data = json.loads(msg.body)
+            _state["panel_health"] = data
+            _touch()
+            await _broadcast("panel_health", data)
+            logger.info("Panel health | farm=%s panels=%d avg_hi=%.3f",
+                        data.get("farm_id"), len(data.get("panel_health", [])),
+                        data.get("avg_health_index", 0))
+        except Exception:
+            logger.exception("Failed to process panel health message")
+
+
 async def _on_idb(msg: aio_pika.IncomingMessage) -> None:
     async with msg.process(requeue=False):
         try:
@@ -169,6 +184,10 @@ async def _consume() -> None:
     fleet_q = await channel.declare_queue("dashboard.fleet_schedule", durable=True)
     await fleet_q.bind(exchange, routing_key="central.fleet")
     await fleet_q.consume(_on_fleet)
+
+    panel_q = await channel.declare_queue("dashboard.panel_health", durable=True)
+    await panel_q.bind(exchange, routing_key="iot.health")
+    await panel_q.consume(_on_panel_health)
 
     strategy_q = await channel.declare_queue("dashboard.strategy_profile", durable=True)
     await strategy_q.bind(exchange, routing_key="strategy.profile")

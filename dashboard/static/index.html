@@ -162,6 +162,13 @@
     flex-wrap: wrap;
   }
 
+  /* ── Health index cell colour ── */
+  .hi-high   { color: var(--healthy);  font-weight: 700; }
+  .hi-mid    { color: var(--stable);   font-weight: 700; }
+  .hi-low    { color: var(--degrading);font-weight: 700; }
+  .hi-crit   { color: var(--critical); font-weight: 700; }
+  .degrad-flag { color: var(--critical); font-size: 11px; font-weight: 700; }
+
   /* ── IDB battery vis ── */
   .soc-bar-wrap {
     background: var(--border);
@@ -307,7 +314,51 @@
     </div>
   </div>
 
-  <!-- Card 4: Fleet Schedule (full width) -->
+  <!-- Card 4: Inverter Health (full width) -->
+  <div class="card wide" id="card-inverters">
+    <h2>Inverter Health (IoT Layer Output)</h2>
+    <div class="empty" id="inverters-empty">Waiting for sensor data…</div>
+    <div id="inverters-body" style="display:none">
+      <div style="display:flex;gap:32px;margin-bottom:16px;flex-wrap:wrap">
+        <div class="metric-row">
+          <span class="metric-label">Farm</span>
+          <span class="metric-value sm" id="inv-farm">–</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">Irradiance</span>
+          <div><span class="metric-value" id="inv-irr">–</span><span class="metric-unit">W/m²</span></div>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">Avg Health Index</span>
+          <div><span class="metric-value" id="inv-avg-hi">–</span><span class="metric-unit">/ 1.0</span></div>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">Degraded</span>
+          <span class="metric-value sm" id="inv-degrad-count">–</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">Timestamp</span>
+          <span class="metric-value sm" id="inv-ts">–</span>
+        </div>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Inverter</th>
+            <th>Power</th>
+            <th>Irradiance</th>
+            <th>Efficiency</th>
+            <th>Health Index</th>
+            <th>Temp</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="inv-table-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Card 5: Fleet Schedule (full width) -->
   <div class="card wide" id="card-fleet">
     <h2>Fleet Schedule (Control Executor Output)</h2>
     <div class="empty" id="fleet-empty">Waiting for sensor data → IoT → Regional → Central pipeline to fire…</div>
@@ -438,6 +489,53 @@
     $('idb-vib').textContent = fmt(d.compressor_vibration_g, 3);
   }
 
+  function hiClass(hi) {
+    if (hi >= 0.75) return 'hi-high';
+    if (hi >= 0.50) return 'hi-mid';
+    if (hi >= 0.25) return 'hi-low';
+    return 'hi-crit';
+  }
+
+  function renderPanelHealth(d) {
+    show('inverters-body', 'inverters-empty');
+    const panels = d.panel_health || [];
+    $('inv-farm').textContent  = d.farm_id || '–';
+    $('inv-ts').textContent    = fmtTs(d.timestamp);
+    $('inv-avg-hi').textContent = fmt(d.avg_health_index, 3);
+
+    // Irradiance from first panel (same sensor for all)
+    const irr = panels.length ? Number(panels[0].irradiance_wm2) : 0;
+    $('inv-irr').textContent = fmt(irr, 0);
+
+    const degradedCount = panels.filter(p => p.degradation_flag).length;
+    $('inv-degrad-count').textContent = degradedCount > 0
+      ? `${degradedCount} ⚠`
+      : '0';
+    $('inv-degrad-count').style.color = degradedCount > 0
+      ? 'var(--critical)' : 'var(--healthy)';
+
+    const tbody = $('inv-table-body');
+    tbody.innerHTML = '';
+    panels.forEach(p => {
+      const hi   = Number(p.health_index);
+      const eff  = Number(p.efficiency);
+      const name = String(p.panel_id).split('_').pop(); // "6707ba_ELDCwM" → "ELDCwM"
+      const status = p.degradation_flag
+        ? '<span class="degrad-flag">⚠ DEGRADED</span>'
+        : '<span style="color:var(--healthy);font-size:11px">✓ OK</span>';
+      tbody.innerHTML += `
+        <tr>
+          <td style="font-weight:600">${name}</td>
+          <td>${fmt(p.power_kw, 2)} kW</td>
+          <td>${fmt(p.irradiance_wm2, 0)} W/m²</td>
+          <td>${fmt(eff * 100, 1)}%</td>
+          <td class="${hiClass(hi)}">${fmt(hi, 3)}</td>
+          <td>${fmt(p.inverter_temp_c, 1)}°C</td>
+          <td>${status}</td>
+        </tr>`;
+    });
+  }
+
   function renderFleet(d) {
     show('fleet-body', 'fleet-empty');
     $('f-gen').textContent = fmt(d.total_generation_kw, 1);
@@ -461,10 +559,11 @@
   }
 
   function renderState(state) {
-    if (state.consensus) renderConsensus(state.consensus);
-    if (state.strategy)  renderStrategy(state.strategy);
-    if (state.idb)       renderIdb(state.idb);
-    if (state.fleet)     renderFleet(state.fleet);
+    if (state.consensus)    renderConsensus(state.consensus);
+    if (state.strategy)     renderStrategy(state.strategy);
+    if (state.idb)          renderIdb(state.idb);
+    if (state.panel_health) renderPanelHealth(state.panel_health);
+    if (state.fleet)        renderFleet(state.fleet);
     if (state.last_updated) {
       $('last-updated').textContent = 'Updated ' + fmtTs(state.last_updated);
     }
@@ -490,10 +589,11 @@
       } else {
         // Partial update
         const handlers = {
-          fleet:     renderFleet,
-          strategy:  renderStrategy,
-          consensus: renderConsensus,
-          idb:       renderIdb,
+          fleet:        renderFleet,
+          strategy:     renderStrategy,
+          consensus:    renderConsensus,
+          idb:          renderIdb,
+          panel_health: renderPanelHealth,
         };
         if (handlers[msg.type]) handlers[msg.type](msg.data);
         $('last-updated').textContent = 'Updated ' + new Date().toLocaleTimeString();

@@ -40,6 +40,8 @@ class PanelHealth(BaseModel):
     efficiency: float         = Field(..., description="Measured efficiency (0–1)")
     degradation_flag: bool    = Field(default=False)
     inverter_temp_c: float
+    power_kw: float           = Field(default=0.0, description="Measured active power (kW)")
+    irradiance_wm2: float     = Field(default=0.0, description="Plane-of-array irradiance (W/m²)")
 
 
 class PanelHealthMessage(BaseModel):

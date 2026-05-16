@@ -23,3 +23,10 @@ logs/
 *.lp
 *.mps
 *.glpk
+*.pem
+*.pdf
+*.docx
+
+/Enverse_data/
+6707ba_*.csv
+logs*.json
