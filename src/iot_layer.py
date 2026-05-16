@@ -25,6 +25,7 @@ from config.settings import (
     EXPECTED_EFFICIENCY,
     EFFICIENCY_TOLERANCE,
     MAX_SAFE_TEMP_C,
+    MIN_IRRADIANCE_WM2,
     PANEL_AREA_M2,
     RABBITMQ_URL,
     EXCHANGE_MAIN,
@@ -55,6 +56,7 @@ def compute_panel_health(
     expected_efficiency: float = EXPECTED_EFFICIENCY,
     efficiency_tolerance: float = EFFICIENCY_TOLERANCE,
     max_safe_temp: float = MAX_SAFE_TEMP_C,
+    min_irradiance: float = MIN_IRRADIANCE_WM2,
 ) -> PanelHealth:
     """
     Compute Health Index for a single panel.
@@ -69,9 +71,9 @@ def compute_panel_health(
     -------
     PanelHealth dataclass with hi, degradation_flag, efficiency
     """
-    # Guard against zero irradiance (night / sensor error)
-    # Efficiency can't be measured without irradiance; use temperature component only
-    if irradiance_wm2 <= 0:
+    # Below min_irradiance (default 10 W/m²) treat as night/sensor noise —
+    # efficiency is unmeasurable and degradation flags would be meaningless.
+    if irradiance_wm2 < min_irradiance:
         temp_ratio = inverter_temp_c / max_safe_temp
         temp_component = max(0.0, 1.0 - temp_ratio)
         hi = max(0.0, min(0.5 * 1.0 + 0.5 * temp_component, 1.0))

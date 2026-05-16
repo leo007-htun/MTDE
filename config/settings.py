@@ -39,6 +39,7 @@ PANEL_AREA_M2          = float(os.getenv("PANEL_AREA_M2", "1.96"))
 EXPECTED_EFFICIENCY    = float(os.getenv("EXPECTED_EFFICIENCY", "0.20"))
 EFFICIENCY_TOLERANCE   = float(os.getenv("EFFICIENCY_TOLERANCE", "0.02"))
 MAX_SAFE_TEMP_C        = float(os.getenv("MAX_SAFE_TEMP_C", "85.0"))
+MIN_IRRADIANCE_WM2     = float(os.getenv("MIN_IRRADIANCE_WM2", "10.0"))  # below this, treat as night
 P_MAX_KW               = float(os.getenv("P_MAX_KW", "500.0"))
 BATT_MAX_KWH           = float(os.getenv("BATT_MAX_KWH", "1000.0"))
 
