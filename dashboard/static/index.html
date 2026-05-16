@@ -412,7 +412,7 @@
   function fmtTs(iso) {
     if (!iso) return '–';
     const d = new Date(iso);
-    return d.toLocaleTimeString();
+    return d.toLocaleTimeString([], {timeZone: 'UTC', hour12: false}) + ' UTC';
   }
 
   function stressColor(s) {
